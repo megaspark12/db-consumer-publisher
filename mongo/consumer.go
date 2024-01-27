@@ -15,17 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
-const (
-	username = "admin"
-	password = "admin"
-)
-
-// type Document struct {
-// 	ID   any       `bson:"_id,omitempty"`
-// 	Body any       `bson:"name"`
-// 	Age  time.Time `bson:"age"`
-// }
-
 type MongoService struct {
 	client *mongo.Client
 }
