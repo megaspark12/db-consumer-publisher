@@ -13,12 +13,13 @@ func main() {
 		panic(err)
 	}
 
-	result, err := mongoService.Consume("db1", "c1", 10*time.Second)
+	result, err := mongoService.DetailedConsume("db1", "c1", 15*time.Second)
 	if err != nil {
 		panic(err)
 	}
 	for _, doc := range result {
-		fmt.Println(string(doc))
+		fmt.Println(string(doc.Body))
+		fmt.Println(doc.Timestamp)
 		fmt.Println()
 	}
 }
