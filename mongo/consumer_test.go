@@ -97,3 +97,99 @@ func Test_fetchAll(t *testing.T) {
 		})
 	})
 }
+
+func Test_watchForChanges(t *testing.T) {
+	expectedDocs := []bson.M{{"ben": 0}, {"ben": 1}, bson.M(nil)}
+
+	expectedChangeEvents := []bson.M{}
+	objectId := primitive.ObjectID{}
+	copy(objectId[:], []byte("modifymodify"))
+	expectedChangeEvents = append(expectedChangeEvents,
+		bson.M{
+			"documentKey": bson.M{
+				"_id": objectId,
+			},
+			"fullDocument": expectedDocs[0],
+		},
+	)
+
+	copy(objectId[:], []byte("insertinsert"))
+	expectedChangeEvents = append(expectedChangeEvents,
+		bson.M{
+			"documentKey": bson.M{
+				"_id": objectId,
+			},
+			"fullDocument": expectedDocs[1],
+		},
+	)
+
+	copy(objectId[:], []byte("deletedelete"))
+	expectedChangeEvents = append(expectedChangeEvents,
+		bson.M{
+			"documentKey": bson.M{
+				"_id": objectId,
+			},
+		},
+	)
+	collection := &mongo.Collection{}
+	cs := &mongo.ChangeStream{
+		Current: bson.Raw{0},
+	}
+	watchPatch := gomonkey.ApplyMethodFunc(collection, "Watch", func(_ context.Context, _ interface{}, _ ...*options.ChangeStreamOptions) (*mongo.ChangeStream, error) {
+		return cs, nil
+	})
+	defer watchPatch.Reset()
+
+	closeStreamPatch := gomonkey.ApplyMethodFunc(&mongo.ChangeStream{}, "Close", func(_ context.Context) error {
+		return nil
+	})
+	defer closeStreamPatch.Reset()
+
+	nextPatch := gomonkey.ApplyMethodFunc(cs, "Next", func(_ context.Context) bool {
+		return cs.Current[0] <= 2
+	})
+	defer nextPatch.Reset()
+
+	t.Run("watch for 3 changes one for each type", func(t *testing.T) {
+		decodePatch := gomonkey.ApplyMethodFunc(cs, "Decode", func(val interface{}) error {
+			doc := val.(*bson.M)
+			*doc = expectedChangeEvents[cs.Current[0]]
+			cs.Current[0]++
+			return nil
+		})
+		defer decodePatch.Reset()
+
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.Nil(t, err)
+		for _, ce := range changeEvents {
+			assert.Contains(t, expectedDocs, ce.doc)
+		}
+	})
+
+	t.Run("_id is not ObjectID", func(t *testing.T) {
+		expectedChangeEvents[0]["documentKey"].(bson.M)["_id"] = "id"
+		cs.Current[0] = 0
+		decodePatch := gomonkey.ApplyMethodFunc(cs, "Decode", func(val interface{}) error {
+			doc := val.(*bson.M)
+			*doc = expectedChangeEvents[cs.Current[0]]
+			cs.Current[0]++
+			return nil
+		})
+		defer decodePatch.Reset()
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.NotNil(t, err)
+		assert.Equal(t, "could not get '_id' of change event", err.Error())
+		assert.Empty(t, changeEvents)
+	})
+
+}

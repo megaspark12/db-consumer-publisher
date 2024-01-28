@@ -199,6 +199,7 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 	changeStream, err := collection.Watch(ctx, mongo.Pipeline{})
 	if err != nil {
 		errChan <- err
+		close(errChan)
 		return
 	}
 	defer changeStream.Close(ctx)
@@ -207,11 +208,14 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 		var event bson.M
 		if err = changeStream.Decode(&event); err != nil {
 			errChan <- err
+			close(errChan)
 			return
 		}
 		id, ok := ((event["documentKey"]).(bson.M)["_id"]).(primitive.ObjectID)
 		if !ok {
 			errChan <- errors.New("could not get '_id' of change event")
+			close(errChan)
+			return
 		}
 
 		doc, ok := event["fullDocument"]
@@ -227,6 +231,7 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 			}
 		}
 	}
+	close(docChan)
 }
 
 func (m *MongoService) Populate(databaseName, collectionName string) (err error) {
