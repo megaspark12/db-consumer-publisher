@@ -192,4 +192,27 @@ func Test_watchForChanges(t *testing.T) {
 		assert.Empty(t, changeEvents)
 	})
 
+	t.Run("documentKey is not bson.M", func(t *testing.T) {
+		expectedChangeEvents[0] = bson.M{
+			"documentKey": "documentKey",
+		}
+		cs.Current[0] = 0
+		decodePatch := gomonkey.ApplyMethodFunc(cs, "Decode", func(val interface{}) error {
+			doc := val.(*bson.M)
+			*doc = expectedChangeEvents[cs.Current[0]]
+			cs.Current[0]++
+			return nil
+		})
+		defer decodePatch.Reset()
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.NotNil(t, err)
+		assert.Equal(t, "could not get '_id' of change event", err.Error())
+		assert.Empty(t, changeEvents)
+	})
+
 }

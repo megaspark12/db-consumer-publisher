@@ -211,7 +211,8 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 			close(errChan)
 			return
 		}
-		id, ok := ((event["documentKey"]).(bson.M)["_id"]).(primitive.ObjectID)
+
+		
 		if !ok {
 			errChan <- errors.New("could not get '_id' of change event")
 			close(errChan)
@@ -232,6 +233,22 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 		}
 	}
 	close(docChan)
+}
+
+func getChangeEventDocId(event bson.M) (primitive.ObjectID, error) {
+	documentKey, ok := event["documentKey"]
+	if !ok {
+		return errors.New("key documentKey does not exists in change event")
+	}
+
+	docKeyMap, ok := documentKey.(bson.M)
+	if !ok {
+		return errors.New("value of key documentKey is not bson.M")
+	}
+
+	id, ok := docKeyMap["_id"]
+	
+	.(primitive.ObjectID)
 }
 
 func (m *MongoService) Populate(databaseName, collectionName string) (err error) {
