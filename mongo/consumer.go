@@ -25,7 +25,7 @@ type DetailedMessage[T any] struct {
 }
 
 type changeEvent struct {
-	id  string
+	id  primitive.ObjectID
 	doc bson.M
 }
 
@@ -151,8 +151,8 @@ func (m *MongoService) AsyncDetailedConsume(databaseName, collectionName string,
 	return detailedMessagesChan, errChan
 }
 
-func mapDocs(docs []bson.M) (map[string]*DetailedMessage[bson.M], error) {
-	docsMap := make(map[string]*DetailedMessage[bson.M])
+func mapDocs(docs []bson.M) (map[primitive.ObjectID]*DetailedMessage[bson.M], error) {
+	docsMap := make(map[primitive.ObjectID]*DetailedMessage[bson.M])
 
 	for _, doc := range docs {
 		id, err := getDocId(doc)
@@ -165,17 +165,17 @@ func mapDocs(docs []bson.M) (map[string]*DetailedMessage[bson.M], error) {
 	return docsMap, nil
 }
 
-func getDocId(doc bson.M) (string, error) {
+func getDocId(doc bson.M) (id primitive.ObjectID, err error) {
 	objectId, ok := doc["_id"]
 	if !ok {
-		return "", errors.New("key '_id' does not exist in document")
+		return id, errors.New("key '_id' does not exist in document")
 	}
 
-	id, ok := objectId.(primitive.ObjectID)
+	id, ok = objectId.(primitive.ObjectID)
 	if !ok {
-		return "", errors.New("could not infer type of value with key: '_id'")
+		return id, errors.New("could not infer type of value with key: '_id'")
 	}
-	return id.Hex(), nil
+	return
 }
 
 func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collection, filter bson.M) (docs []bson.M, err error) {
@@ -217,12 +217,12 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 		doc, ok := event["fullDocument"]
 		if ok {
 			docChan <- &changeEvent{
-				id:  id.Hex(),
+				id:  id,
 				doc: doc.(bson.M),
 			}
 		} else {
 			docChan <- &changeEvent{
-				id:  id.Hex(),
+				id:  id,
 				doc: nil,
 			}
 		}
