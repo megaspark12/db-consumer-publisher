@@ -45,9 +45,9 @@ func main() {
 	switch v := result.(type) {
 	case error:
 		panic(v)
-	case []*mongo.DetailedMessage:
+	case []*mongo.DetailedMessage[[]byte]:
 		for _, doc := range v {
-			// fmt.Println(string(doc.Body))
+			fmt.Println(string(doc.Body))
 			fmt.Println(doc.Timestamp)
 			fmt.Println()
 		}

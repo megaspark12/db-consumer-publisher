@@ -19,19 +19,14 @@ type MongoService struct {
 	client *mongo.Client
 }
 
-type DetailedMessage struct {
-	Body      []byte
+type DetailedMessage[T any] struct {
+	Body      T
 	Timestamp time.Time
 }
 
 type changeEvent struct {
 	id  string
 	doc bson.M
-}
-
-type document struct {
-	Doc       bson.M
-	Timestamp time.Time
 }
 
 func NewMongoService(hostname string, port int, username, password string) (*MongoService, error) {
@@ -58,11 +53,7 @@ func NewMongoService(hostname string, port int, username, password string) (*Mon
 	return &MongoService{client: client}, nil
 }
 
-func (m *MongoService) DetailedConsume(databaseName, collectionName string, timeout time.Duration) (result []*DetailedMessage, err error) {
-	// ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	// defer cancel()
-
-	// Access a MongoDB collection
+func (m *MongoService) DetailedConsume(databaseName, collectionName string, timeout time.Duration) (result []*DetailedMessage[[]byte], err error) {
 	collection := m.client.Database(databaseName).Collection(collectionName)
 
 	documents, err := m.fetchAll(context.Background(), collection, bson.D{{}})
@@ -92,7 +83,7 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 			if doc.doc == nil {
 				delete(docs, doc.id)
 			} else {
-				docs[doc.id] = &document{Doc: doc.doc, Timestamp: time.Now()}
+				docs[doc.id] = &DetailedMessage[bson.M]{Body: doc.doc, Timestamp: time.Now()}
 			}
 		case err := <-errChan:
 			return nil, err
@@ -100,24 +91,24 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 	}
 
 	for _, value := range docs {
-		docJson, err := json.Marshal(value.Doc)
+		docJson, err := json.Marshal(value)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, &DetailedMessage{Body: docJson, Timestamp: value.Timestamp})
+		result = append(result, &DetailedMessage[[]byte]{Body: docJson, Timestamp: value.Timestamp})
 	}
 	return
 }
 
-func mapDocs(docs []bson.M) (map[string]*document, error) {
-	docsMap := make(map[string]*document)
+func mapDocs(docs []bson.M) (map[string]*DetailedMessage[bson.M], error) {
+	docsMap := make(map[string]*DetailedMessage[bson.M])
 
 	for _, doc := range docs {
 		id, err := getDocId(doc)
 		if err != nil {
 			return nil, err
 		}
-		docsMap[id] = &document{Doc: doc, Timestamp: time.Now()}
+		docsMap[id] = &DetailedMessage[bson.M]{Body: doc, Timestamp: time.Now()}
 	}
 
 	return docsMap, nil
