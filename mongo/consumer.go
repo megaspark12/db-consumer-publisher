@@ -35,8 +35,17 @@ type document struct {
 }
 
 func NewMongoService(hostname string, port int, username, password string) (*MongoService, error) {
+	var client *mongo.Client
+	var err error
 	ctx := context.Background()
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%d", hostname, port)))
+
+	if username == "" || password == "" {
+		client, err = mongo.Connect(ctx, options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%d", hostname, port)))
+
+	} else {
+		client, err = mongo.Connect(ctx, options.Client().ApplyURI(fmt.Sprintf("mongodb://%s:%d", hostname, port)).SetAuth(options.Credential{Username: username, Password: password}))
+
+	}
 	if err != nil {
 		return nil, err
 	}

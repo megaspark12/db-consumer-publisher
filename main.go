@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	mongoService, err := mongo.NewMongoService("localhost", 27017, "admin", "admin")
+	mongoService, err := mongo.NewMongoService("localhost", 27017, "", "")
 	if err != nil {
 		panic(err)
 	}
