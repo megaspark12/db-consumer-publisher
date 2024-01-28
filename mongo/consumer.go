@@ -53,10 +53,23 @@ func NewMongoService(hostname string, port int, username, password string) (*Mon
 	return &MongoService{client: client}, nil
 }
 
+func (m *MongoService) Consume(databaseName, collectionName string, timeout time.Duration) (result [][]byte, err error) {
+	detailedMessages, err := m.DetailedConsume(databaseName, collectionName, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, detailedMessage := range detailedMessages {
+		result = append(result, detailedMessage.Body)
+	}
+
+	return
+}
+
 func (m *MongoService) DetailedConsume(databaseName, collectionName string, timeout time.Duration) (result []*DetailedMessage[[]byte], err error) {
 	collection := m.client.Database(databaseName).Collection(collectionName)
 
-	documents, err := m.fetchAll(context.Background(), collection, bson.D{{}})
+	documents, err := m.fetchAll(context.Background(), collection, bson.M{})
 	if err != nil {
 		return nil, err
 	}
@@ -66,10 +79,10 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 		return nil, err
 	}
 
-	docChan := make(chan *changeEvent)
+	eventChan := make(chan *changeEvent)
 	errChan := make(chan error)
 
-	go watchForChanges(docChan, errChan, collection)
+	go watchForChanges(eventChan, errChan, collection)
 
 	watch := true
 	for watch {
@@ -79,11 +92,11 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 		case <-timeoutChan:
 			fmt.Println("timeout reached")
 			watch = false
-		case doc := <-docChan:
-			if doc.doc == nil {
-				delete(docs, doc.id)
+		case changeEvent := <-eventChan:
+			if changeEvent.doc == nil {
+				delete(docs, changeEvent.id)
 			} else {
-				docs[doc.id] = &DetailedMessage[bson.M]{Body: doc.doc, Timestamp: time.Now()}
+				docs[changeEvent.id] = &DetailedMessage[bson.M]{Body: changeEvent.doc, Timestamp: time.Now()}
 			}
 		case err := <-errChan:
 			return nil, err
@@ -91,13 +104,51 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 	}
 
 	for _, value := range docs {
-		docJson, err := json.Marshal(value)
+		docJson, err := json.Marshal(value.Body)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, &DetailedMessage[[]byte]{Body: docJson, Timestamp: value.Timestamp})
 	}
 	return
+}
+
+func (m *MongoService) AsyncConsume(databaseName, collectionName string, timeout time.Duration) (chan []byte, chan error) {
+	docsChan := make(chan []byte)
+	errChan := make(chan error)
+
+	go func() {
+		detailedMessages, err := m.DetailedConsume(databaseName, collectionName, timeout)
+		if err != nil {
+			errChan <- err
+			close(errChan)
+			return
+		}
+		for _, detailedMessage := range detailedMessages {
+			docsChan <- detailedMessage.Body
+		}
+		close(docsChan)
+	}()
+	return docsChan, errChan
+}
+
+func (m *MongoService) AsyncDetailedConsume(databaseName, collectionName string, timeout time.Duration) (chan *DetailedMessage[[]byte], chan error) {
+	detailedMessagesChan := make(chan *DetailedMessage[[]byte])
+	errChan := make(chan error)
+
+	go func() {
+		detailedMessages, err := m.DetailedConsume(databaseName, collectionName, timeout)
+		if err != nil {
+			errChan <- err
+			close(errChan)
+			return
+		}
+		for _, detailedMessage := range detailedMessages {
+			detailedMessagesChan <- detailedMessage
+		}
+		close(detailedMessagesChan)
+	}()
+	return detailedMessagesChan, errChan
 }
 
 func mapDocs(docs []bson.M) (map[string]*DetailedMessage[bson.M], error) {
@@ -127,8 +178,7 @@ func getDocId(doc bson.M) (string, error) {
 	return id.Hex(), nil
 }
 
-func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collection, filter bson.D) (docs []bson.M, err error) {
-	// Perform a find operation
+func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collection, filter bson.M) (docs []bson.M, err error) {
 	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
 		return
@@ -137,10 +187,10 @@ func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collectio
 	defer cursor.Close(ctx)
 
 	err = cursor.All(ctx, &docs)
-
 	if err != nil {
 		return nil, err
 	}
+
 	return
 }
 
