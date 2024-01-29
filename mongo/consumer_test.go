@@ -364,4 +364,15 @@ func Test_DetailedConsume(t *testing.T) {
 
 	patchFetchAll := gomonkey.ApplyMethodReturn(mongoService, "fetchAll", docs, nil)
 	defer patchFetchAll.Reset()
+
+	patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
+		for _, doc := range docs {
+			changeEventChan <- &changeEvent{
+				id:  doc["_id"].(primitive.ObjectID),
+				doc: doc,
+			}
+		}
+		close(changeEventChan)
+	})
+	defer patchWatchForChanges.Reset()
 }

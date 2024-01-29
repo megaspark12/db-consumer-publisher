@@ -159,7 +159,7 @@ func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collectio
 	return
 }
 
-func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *mongo.Collection) {
+func watchForChanges(changeEventChan chan *changeEvent, errChan chan error, collection *mongo.Collection) {
 	ctx := context.Background()
 	changeStream, err := collection.Watch(ctx, mongo.Pipeline{})
 	if err != nil {
@@ -186,18 +186,18 @@ func watchForChanges(docChan chan *changeEvent, errChan chan error, collection *
 
 		doc, ok := event["fullDocument"]
 		if ok {
-			docChan <- &changeEvent{
+			changeEventChan <- &changeEvent{
 				id:  changeEventId,
 				doc: doc.(bson.M),
 			}
 		} else {
-			docChan <- &changeEvent{
+			changeEventChan <- &changeEvent{
 				id:  changeEventId,
 				doc: nil,
 			}
 		}
 	}
-	close(docChan)
+	close(changeEventChan)
 }
 
 func getChangeEventDocId(event bson.M) (changeEventId primitive.ObjectID, err error) {
