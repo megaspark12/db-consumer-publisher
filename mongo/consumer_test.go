@@ -301,12 +301,6 @@ func Test_mapDocs(t *testing.T) {
 		time.Date(2002, time.January, 1, 0, 0, 0, 0, &time.Location{}),
 	}
 
-	docs := []bson.M{
-		{"_id": primitive.ObjectID([12]byte{1}), "ben": 1},
-		{"_id": primitive.ObjectID([12]byte{2}), "ben": 2},
-		{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
-	}
-
 	outputs := []gomonkey.OutputCell{
 		{Values: gomonkey.Params{times[0]}},
 		{Values: gomonkey.Params{times[1]}},
@@ -314,6 +308,11 @@ func Test_mapDocs(t *testing.T) {
 	}
 
 	t.Run("all docs mapped successfully", func(t *testing.T) {
+		docs := []bson.M{
+			{"_id": primitive.ObjectID([12]byte{1}), "ben": 1},
+			{"_id": primitive.ObjectID([12]byte{2}), "ben": 2},
+			{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
+		}
 		nowPatch := gomonkey.ApplyFuncSeq(time.Now, outputs)
 		defer nowPatch.Reset()
 		docsMap, err := mapDocs(docs)
@@ -327,7 +326,11 @@ func Test_mapDocs(t *testing.T) {
 	})
 
 	t.Run("error getting doc id", func(t *testing.T) {
-		delete(docs[0], "_id")
+		docs := []bson.M{
+			{"ben": 1},
+			{"_id": primitive.ObjectID([12]byte{2}), "ben": 2},
+			{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
+		}
 		nowPatch := gomonkey.ApplyFuncSeq(time.Now, outputs)
 		defer nowPatch.Reset()
 		docsMap, err := mapDocs(docs)
