@@ -319,8 +319,9 @@ func Test_mapDocs(t *testing.T) {
 		assert.Nil(t, err)
 		i := 0
 		for _, value := range docsMap {
-			assert.Equal(t, value.Body, docs[i])
-			assert.Equal(t, value.Timestamp, times[i])
+			assert.Len(t, docsMap, len(docs))
+			assert.Contains(t, docs, value.Body)
+			assert.Contains(t, times, value.Timestamp)
 			i++
 		}
 	})
@@ -331,8 +332,6 @@ func Test_mapDocs(t *testing.T) {
 			{"_id": primitive.ObjectID([12]byte{2}), "ben": 2},
 			{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
 		}
-		nowPatch := gomonkey.ApplyFuncSeq(time.Now, outputs)
-		defer nowPatch.Reset()
 		docsMap, err := mapDocs(docs)
 		assert.NotNil(t, err)
 		assert.Nil(t, docsMap)
