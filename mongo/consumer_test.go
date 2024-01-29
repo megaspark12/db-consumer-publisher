@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	gomonkey "github.com/agiledragon/gomonkey/v2"
 	"github.com/stretchr/testify/assert"
@@ -188,7 +189,29 @@ func Test_watchForChanges(t *testing.T) {
 
 		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
 		assert.NotNil(t, err)
-		assert.Equal(t, "could not get '_id' of change event", err.Error())
+		assert.Equal(t, "value of key '_id' is not ObjectID", err.Error())
+		assert.Empty(t, changeEvents)
+	})
+
+	t.Run("key _id does not exist in changeEvent", func(t *testing.T) {
+		delete(expectedChangeEvents[0]["documentKey"].(bson.M), "_id")
+		cs.Current[0] = 0
+		decodePatch := gomonkey.ApplyMethodFunc(cs, "Decode", func(val interface{}) error {
+			doc := val.(*bson.M)
+			*doc = expectedChangeEvents[cs.Current[0]]
+			cs.Current[0]++
+			return nil
+		})
+		defer decodePatch.Reset()
+
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.NotNil(t, err)
+		assert.Equal(t, "key '_id' does not exist", err.Error())
 		assert.Empty(t, changeEvents)
 	})
 
@@ -211,8 +234,96 @@ func Test_watchForChanges(t *testing.T) {
 
 		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
 		assert.NotNil(t, err)
-		assert.Equal(t, "could not get '_id' of change event", err.Error())
+		assert.Equal(t, "value of key 'documentKey' is not bson.M", err.Error())
 		assert.Empty(t, changeEvents)
+	})
+
+	t.Run("documentKey does not exist in change event", func(t *testing.T) {
+		delete(expectedChangeEvents[0], "documentKey")
+		cs.Current[0] = 0
+		decodePatch := gomonkey.ApplyMethodFunc(cs, "Decode", func(val interface{}) error {
+			doc := val.(*bson.M)
+			*doc = expectedChangeEvents[cs.Current[0]]
+			cs.Current[0]++
+			return nil
+		})
+		defer decodePatch.Reset()
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.NotNil(t, err)
+		assert.Equal(t, "key 'documentKey' does not exists in change event", err.Error())
+		assert.Empty(t, changeEvents)
+	})
+
+	t.Run("failed to decode change event", func(t *testing.T) {
+		decodePatch := gomonkey.ApplyMethodFunc(cs, "Decode", func(val interface{}) error {
+			return errors.New("error decoding change event")
+		})
+		defer decodePatch.Reset()
+
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error decoding change event", err.Error())
+		assert.Empty(t, changeEvents)
+	})
+
+	t.Run("failed to watch for change events", func(t *testing.T) {
+		watchPatch := gomonkey.ApplyMethodFunc(collection, "Watch", func(_ context.Context, _ interface{}, _ ...*options.ChangeStreamOptions) (*mongo.ChangeStream, error) {
+			return nil, errors.New("error in watch")
+		})
+		defer watchPatch.Reset()
+
+		changeEventChan := make(chan *changeEvent)
+		errChan := make(chan error)
+
+		go watchForChanges(changeEventChan, errChan, &mongo.Collection{})
+
+		changeEvents, err := WaitUntilDone(changeEventChan, errChan)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in watch", err.Error())
+		assert.Empty(t, changeEvents)
+	})
+}
+
+func Test_mapDocs(t *testing.T) {
+	times := []time.Time{
+		time.Date(2000, time.January, 1, 0, 0, 0, 0, &time.Location{}),
+		time.Date(2001, time.January, 1, 0, 0, 0, 0, &time.Location{}),
+		time.Date(2002, time.January, 1, 0, 0, 0, 0, &time.Location{}),
+	}
+
+	docs := []bson.M{
+		{"_id": primitive.ObjectID([12]byte{1}), "ben": 1},
+		{"_id": primitive.ObjectID([12]byte{2}), "ben": 2},
+		{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
+	}
+
+	outputs := []gomonkey.OutputCell{
+		{Values: gomonkey.Params{times[0]}},
+		{Values: gomonkey.Params{times[1]}},
+		{Values: gomonkey.Params{times[2]}},
+	}
+
+	t.Run("all docs mapped successfully", func(t *testing.T) {
+		nowPatch := gomonkey.ApplyFuncSeq(time.Now, outputs)
+		defer nowPatch.Reset()
+		docsMap, err := mapDocs(docs)
+		assert.Nil(t, err)
+		i := 0
+		for _, value := range docsMap {
+			assert.Equal(t, value.Body, docs[i])
+			assert.Equal(t, value.Timestamp, times[i])
+			i++
+		}
 	})
 
 }
