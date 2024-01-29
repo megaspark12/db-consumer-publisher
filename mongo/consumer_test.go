@@ -326,4 +326,12 @@ func Test_mapDocs(t *testing.T) {
 		}
 	})
 
+	t.Run("error getting doc id", func(t *testing.T) {
+		delete(docs[0], "_id")
+		nowPatch := gomonkey.ApplyFuncSeq(time.Now, outputs)
+		defer nowPatch.Reset()
+		docsMap, err := mapDocs(docs)
+		assert.NotNil(t, err)
+		assert.Nil(t, docsMap)
+	})
 }
