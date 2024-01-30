@@ -3,12 +3,12 @@ module firefly.io/atmos
 go 1.19
 
 require (
+	github.com/agiledragon/gomonkey/v2 v2.11.0
 	github.com/stretchr/testify v1.8.4
 	go.mongodb.org/mongo-driver v1.13.1
 )
 
 require (
-	github.com/agiledragon/gomonkey/v2 v2.11.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/golang/snappy v0.0.1 // indirect
 	github.com/klauspost/compress v1.13.6 // indirect

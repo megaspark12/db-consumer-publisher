@@ -152,7 +152,9 @@ func Test_watchForChanges(t *testing.T) {
 	cs := &mongo.ChangeStream{
 		Current: bson.Raw{0},
 	}
-	watchPatch := gomonkey.ApplyMethodReturn(collection, "Watch", cs, nil)
+	watchPatch := gomonkey.ApplyMethodFunc(collection, "Watch", func(_ context.Context, _ interface{}, _ ...*options.ChangeStreamOptions) (*mongo.ChangeStream, error) {
+		return cs, nil
+	})
 	defer watchPatch.Reset()
 
 	closeStreamPatch := gomonkey.ApplyMethodReturn(&mongo.ChangeStream{}, "Close", nil)
