@@ -22,10 +22,10 @@ var (
 		{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
 	}
 
-	detailedMesssages = []*DetailedMessage[[]byte]{
-		{Body: []byte(`{"_id": 100000000000, "ben": 1}`)},
-		{Body: []byte(`{"_id": 200000000000, "ben": 2}`)},
-		{Body: []byte(`{"_id": 300000000000, "ben": 3}`)},
+	expectedDetailedMesssages = []*DetailedMessage[[]byte]{
+		{Body: []byte("{\"_id\":\"010000000000000000000000\",\"ben\":1}"), Timestamp: time.Time{}},
+		{Body: []byte("{\"_id\":\"020000000000000000000000\",\"ben\":2}"), Timestamp: time.Time{}},
+		{Body: []byte("{\"_id\":\"030000000000000000000000\",\"ben\":3}"), Timestamp: time.Time{}},
 	}
 )
 
@@ -334,13 +334,13 @@ func Test_mapDocs(t *testing.T) {
 
 func Test_Consume(t *testing.T) {
 	t.Run("all docs consumed successfully", func(t *testing.T) {
-		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", detailedMesssages, nil)
+		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", expectedDetailedMesssages, nil)
 		defer patchDetailedConsume.Reset()
 
 		got, err := mongoService.Consume("", "", time.Duration(1))
 		assert.Nil(t, err)
 		for i, doc := range got {
-			assert.Equal(t, detailedMesssages[i].Body, doc)
+			assert.Equal(t, expectedDetailedMesssages[i].Body, doc)
 		}
 	})
 
@@ -362,17 +362,114 @@ func Test_DetailedConsume(t *testing.T) {
 	patchCollection := gomonkey.ApplyMethodReturn(&mongo.Database{}, "Collection", &mongo.Collection{})
 	defer patchCollection.Reset()
 
-	patchFetchAll := gomonkey.ApplyMethodReturn(mongoService, "fetchAll", docs, nil)
+	patchFetchAll := gomonkey.ApplyPrivateMethod(mongoService, "fetchAll", func(_ context.Context, _ *mongo.Collection, _ primitive.M) ([]primitive.M, error) {
+		return docs, nil
+	})
 	defer patchFetchAll.Reset()
 
-	patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
-		for _, doc := range docs {
-			changeEventChan <- &changeEvent{
-				id:  doc["_id"].(primitive.ObjectID),
-				doc: doc,
+	t.Run("detailed consumed all docs successfully", func(t *testing.T) {
+		patchNow := gomonkey.ApplyFuncReturn(time.Now, time.Time{})
+		defer patchNow.Reset()
+
+		patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
+			for _, doc := range docs {
+				changeEventChan <- &changeEvent{
+					id:  doc["_id"].(primitive.ObjectID),
+					doc: doc,
+				}
 			}
-		}
-		close(changeEventChan)
+			close(changeEventChan)
+		})
+		defer patchWatchForChanges.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 10*time.Second)
+		assert.Nil(t, err)
+		assert.Len(t, gotDetailedMessages, len(expectedDetailedMesssages))
+		assert.ElementsMatch(t, expectedDetailedMesssages, gotDetailedMessages)
 	})
-	defer patchWatchForChanges.Reset()
+
+	t.Run("timeout reached", func(t *testing.T) {
+		patchNow := gomonkey.ApplyFuncReturn(time.Now, time.Time{})
+		defer patchNow.Reset()
+
+		patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
+			time.Sleep(time.Second)
+		})
+		defer patchWatchForChanges.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 1*time.Nanosecond)
+		assert.Nil(t, err)
+		assert.ElementsMatch(t, expectedDetailedMesssages, gotDetailedMessages)
+	})
+
+	t.Run("document is removed", func(t *testing.T) {
+		patchNow := gomonkey.ApplyFuncReturn(time.Now, time.Time{})
+		defer patchNow.Reset()
+
+		patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
+			for i, doc := range docs {
+				if i < 2 {
+					changeEventChan <- &changeEvent{
+						id:  doc["_id"].(primitive.ObjectID),
+						doc: doc,
+					}
+				} else {
+					changeEventChan <- &changeEvent{
+						id:  doc["_id"].(primitive.ObjectID),
+						doc: nil, // document is deleted
+					}
+				}
+
+			}
+			close(changeEventChan)
+		})
+		defer patchWatchForChanges.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", time.Second)
+		assert.Nil(t, err)
+		assert.Len(t, gotDetailedMessages, len(expectedDetailedMesssages)-1)
+		for _, gotDetailedMessage := range gotDetailedMessages {
+			assert.Contains(t, expectedDetailedMesssages, gotDetailedMessage)
+		}
+	})
+
+	t.Run("failed to watch for changes", func(t *testing.T) {
+		patchNow := gomonkey.ApplyFuncReturn(time.Now, time.Time{})
+		defer patchNow.Reset()
+
+		patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
+			errChan <- errors.New("error in watchForChanges")
+		})
+		defer patchWatchForChanges.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", time.Second)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in watchForChanges", err.Error())
+		assert.Nil(t, gotDetailedMessages)
+	})
+
+	t.Run("error mapping docs", func(t *testing.T) {
+		patchFetchAll := gomonkey.ApplyPrivateMethod(mongoService, "fetchAll", func(_ context.Context, _ *mongo.Collection, _ primitive.M) ([]primitive.M, error) {
+			delete(docs[0], "_id")
+			return docs, nil
+		})
+		defer patchFetchAll.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 10*time.Second)
+		assert.NotNil(t, err)
+		assert.Equal(t, "key '_id' does not exist in document", err.Error())
+		assert.Nil(t, gotDetailedMessages)
+	})
+
+	t.Run("error fetching all docs", func(t *testing.T) {
+		patchFetchAll := gomonkey.ApplyPrivateMethod(mongoService, "fetchAll", func(_ context.Context, _ *mongo.Collection, _ primitive.M) ([]primitive.M, error) {
+			return nil, errors.New("error in fetchAll")
+		})
+		defer patchFetchAll.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 10*time.Second)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in fetchAll", err.Error())
+		assert.Nil(t, gotDetailedMessages)
+	})
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -38,7 +37,7 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 		return nil, err
 	}
 
-	docs, err := mapDocs(documents)
+	detailedMessagesMap, err := mapDocs(documents)
 	if err != nil {
 		return nil, err
 	}
@@ -51,23 +50,25 @@ func (m *MongoService) DetailedConsume(databaseName, collectionName string, time
 	watch := true
 	for watch {
 		timeoutChan := time.After(timeout)
-		fmt.Println("restart timer")
 		select {
 		case <-timeoutChan:
-			fmt.Println("timeout reached")
 			watch = false
-		case changeEvent := <-eventChan:
+		case changeEvent, open := <-eventChan:
+			if !open {
+				watch = false
+				break
+			}
 			if changeEvent.doc == nil {
-				delete(docs, changeEvent.id)
+				delete(detailedMessagesMap, changeEvent.id)
 			} else {
-				docs[changeEvent.id] = &DetailedMessage[bson.M]{Body: changeEvent.doc, Timestamp: time.Now()}
+				detailedMessagesMap[changeEvent.id] = &DetailedMessage[bson.M]{Body: changeEvent.doc, Timestamp: time.Now()}
 			}
 		case err := <-errChan:
 			return nil, err
 		}
 	}
 
-	for _, value := range docs {
+	for _, value := range detailedMessagesMap {
 		docJson, err := json.Marshal(value.Body)
 		if err != nil {
 			return nil, err
@@ -118,13 +119,12 @@ func (m *MongoService) AsyncDetailedConsume(databaseName, collectionName string,
 func mapDocs(docs []bson.M) (map[primitive.ObjectID]*DetailedMessage[bson.M], error) {
 	docsMap := make(map[primitive.ObjectID]*DetailedMessage[bson.M])
 
-	for i, doc := range docs {
+	for _, doc := range docs {
 		id, err := getDocId(doc)
 		if err != nil {
 			return nil, err
 		}
 		timestamp := time.Now()
-		fmt.Println(i + 1)
 		docsMap[id] = &DetailedMessage[bson.M]{Body: doc, Timestamp: timestamp}
 	}
 
