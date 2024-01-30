@@ -116,6 +116,19 @@ func (m *MongoService) AsyncDetailedConsume(databaseName, collectionName string,
 	return detailedMessagesChan, errChan
 }
 
+func (m *MongoService) TimestampConsume(databaseName, collectionName string, timeout time.Duration) (timestamps []time.Time, err error) {
+	detailedMessages, err := m.DetailedConsume(databaseName, collectionName, timeout)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, detailedMessage := range detailedMessages {
+		timestamps = append(timestamps, detailedMessage.Timestamp)
+	}
+
+	return
+}
+
 func mapDocs(docs []bson.M) (map[primitive.ObjectID]*DetailedMessage[bson.M], error) {
 	docsMap := make(map[primitive.ObjectID]*DetailedMessage[bson.M])
 

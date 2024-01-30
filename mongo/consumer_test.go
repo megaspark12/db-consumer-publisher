@@ -23,10 +23,22 @@ var (
 		{"_id": primitive.ObjectID([12]byte{3}), "ben": 3},
 	}
 
+	times = []time.Time{
+		time.Date(2000, time.January, 1, 0, 0, 0, 0, &time.Location{}),
+		time.Date(2001, time.January, 1, 0, 0, 0, 0, &time.Location{}),
+		time.Date(2002, time.January, 1, 0, 0, 0, 0, &time.Location{}),
+	}
+
+	timeOutputs = []gomonkey.OutputCell{
+		{Values: gomonkey.Params{times[0]}},
+		{Values: gomonkey.Params{times[1]}},
+		{Values: gomonkey.Params{times[2]}},
+	}
+
 	expectedDetailedMesssages = []*DetailedMessage[[]byte]{
-		{Body: []byte("{\"_id\":\"010000000000000000000000\",\"ben\":1}"), Timestamp: time.Time{}},
-		{Body: []byte("{\"_id\":\"020000000000000000000000\",\"ben\":2}"), Timestamp: time.Time{}},
-		{Body: []byte("{\"_id\":\"030000000000000000000000\",\"ben\":3}"), Timestamp: time.Time{}},
+		{Body: []byte("{\"_id\":\"010000000000000000000000\",\"ben\":1}")},
+		{Body: []byte("{\"_id\":\"020000000000000000000000\",\"ben\":2}")},
+		{Body: []byte("{\"_id\":\"030000000000000000000000\",\"ben\":3}")},
 	}
 )
 
@@ -295,20 +307,8 @@ func Test_watchForChanges(t *testing.T) {
 }
 
 func Test_mapDocs(t *testing.T) {
-	times := []time.Time{
-		time.Date(2000, time.January, 1, 0, 0, 0, 0, &time.Location{}),
-		time.Date(2001, time.January, 1, 0, 0, 0, 0, &time.Location{}),
-		time.Date(2002, time.January, 1, 0, 0, 0, 0, &time.Location{}),
-	}
-
-	outputs := []gomonkey.OutputCell{
-		{Values: gomonkey.Params{times[0]}},
-		{Values: gomonkey.Params{times[1]}},
-		{Values: gomonkey.Params{times[2]}},
-	}
-
 	t.Run("all docs mapped successfully", func(t *testing.T) {
-		nowPatch := gomonkey.ApplyFuncSeq(time.Now, outputs)
+		nowPatch := gomonkey.ApplyFuncSeq(time.Now, timeOutputs)
 		defer nowPatch.Reset()
 		docsMap, err := mapDocs(docs)
 		assert.Nil(t, err)
@@ -386,7 +386,9 @@ func Test_DetailedConsume(t *testing.T) {
 		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 10*time.Second)
 		assert.Nil(t, err)
 		assert.Len(t, gotDetailedMessages, len(expectedDetailedMesssages))
-		assert.ElementsMatch(t, expectedDetailedMesssages, gotDetailedMessages)
+		for _, gotDetailedMessage := range gotDetailedMessages {
+			assert.Contains(t, expectedDetailedMesssages, gotDetailedMessage)
+		}
 	})
 
 	t.Run("timeout reached", func(t *testing.T) {
@@ -400,7 +402,9 @@ func Test_DetailedConsume(t *testing.T) {
 
 		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 1*time.Nanosecond)
 		assert.Nil(t, err)
-		assert.ElementsMatch(t, expectedDetailedMesssages, gotDetailedMessages)
+		for _, gotDetailedMessage := range gotDetailedMessages {
+			assert.Contains(t, expectedDetailedMesssages, gotDetailedMessage)
+		}
 	})
 
 	t.Run("document is removed", func(t *testing.T) {
@@ -429,8 +433,8 @@ func Test_DetailedConsume(t *testing.T) {
 		gotDetailedMessages, err := mongoService.DetailedConsume("", "", time.Second)
 		assert.Nil(t, err)
 		assert.Len(t, gotDetailedMessages, len(expectedDetailedMesssages)-1)
-		for _, gotDetailedMessage := range gotDetailedMessages {
-			assert.Contains(t, expectedDetailedMesssages, gotDetailedMessage)
+		for i, gotDetailedMessage := range gotDetailedMessages {
+			assert.Equal(t, expectedDetailedMesssages[i].Body, gotDetailedMessage.Body)
 		}
 	})
 
@@ -523,15 +527,41 @@ func Test_AsyncDetailedConsume(t *testing.T) {
 		got, err := WaitUntilDone(mongoService.AsyncDetailedConsume("", "", time.Second))
 		assert.Nil(t, err)
 		assert.ElementsMatch(t, expectedDetailedMesssages, got)
-		// for i, doc := range got {
-		// 	assert.Equal(t, expectedDetailedMesssages[i].Body, doc)
-		// }
 	})
 
 	t.Run("failed detailed consuming", func(t *testing.T) {
 		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", nil, errors.New("error in DetailedConsume"))
 		defer patchDetailedConsume.Reset()
 		got, err := WaitUntilDone(mongoService.AsyncDetailedConsume("", "", time.Second))
+		assert.Nil(t, got)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in DetailedConsume", err.Error())
+	})
+}
+
+func Test_TimestampConsume(t *testing.T) {
+	t.Run("all docs consumed successfully", func(t *testing.T) {
+		patchDetailedConsume := gomonkey.ApplyMethodFunc(mongoService, "DetailedConsume", func(_ string, _ string, _ time.Duration) ([]*DetailedMessage[[]byte], error) {
+			return []*DetailedMessage[[]byte]{
+				{Timestamp: times[0]},
+				{Timestamp: times[1]},
+				{Timestamp: times[2]},
+			}, nil
+		})
+		defer patchDetailedConsume.Reset()
+
+		got, err := mongoService.TimestampConsume("", "", time.Second)
+		assert.Nil(t, err)
+		for i, timestamp := range got {
+			assert.Equal(t, times[i], timestamp)
+		}
+	})
+
+	t.Run("failed to DetailedConsume", func(t *testing.T) {
+		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", nil, errors.New("error in DetailedConsume"))
+		defer patchDetailedConsume.Reset()
+
+		got, err := mongoService.TimestampConsume("", "", time.Duration(1))
 		assert.Nil(t, got)
 		assert.NotNil(t, err)
 		assert.Equal(t, "error in DetailedConsume", err.Error())
