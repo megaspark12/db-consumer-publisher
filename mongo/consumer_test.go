@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -433,6 +434,26 @@ func Test_DetailedConsume(t *testing.T) {
 		}
 	})
 
+	t.Run("error marshaling json", func(t *testing.T) {
+		patchWatchForChanges := gomonkey.ApplyFunc(watchForChanges, func(changeEventChan chan *changeEvent, errChan chan error, _ *mongo.Collection) {
+			for _, doc := range docs {
+				changeEventChan <- &changeEvent{
+					id:  doc["_id"].(primitive.ObjectID),
+					doc: doc,
+				}
+			}
+			close(changeEventChan)
+		})
+		defer patchWatchForChanges.Reset()
+		patchMarshal := gomonkey.ApplyFuncReturn(json.Marshal, nil, errors.New("error in json.Marshal"))
+		defer patchMarshal.Reset()
+
+		gotDetailedMessages, err := mongoService.DetailedConsume("", "", 10*time.Second)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in json.Marshal", err.Error())
+		assert.Nil(t, gotDetailedMessages)
+	})
+
 	t.Run("failed to watch for changes", func(t *testing.T) {
 		patchNow := gomonkey.ApplyFuncReturn(time.Now, time.Time{})
 		defer patchNow.Reset()
@@ -471,5 +492,48 @@ func Test_DetailedConsume(t *testing.T) {
 		assert.NotNil(t, err)
 		assert.Equal(t, "error in fetchAll", err.Error())
 		assert.Nil(t, gotDetailedMessages)
+	})
+}
+
+func Test_AsyncConsume(t *testing.T) {
+	t.Run("all docs consumed successfully", func(t *testing.T) {
+		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", expectedDetailedMesssages, nil)
+		defer patchDetailedConsume.Reset()
+		got, err := WaitUntilDone(mongoService.AsyncConsume("", "", time.Second))
+		assert.Nil(t, err)
+		for i, doc := range got {
+			assert.Equal(t, expectedDetailedMesssages[i].Body, doc)
+		}
+	})
+
+	t.Run("failed detailed consuming", func(t *testing.T) {
+		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", nil, errors.New("error in DetailedConsume"))
+		defer patchDetailedConsume.Reset()
+		got, err := WaitUntilDone(mongoService.AsyncConsume("", "", time.Second))
+		assert.Nil(t, got)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in DetailedConsume", err.Error())
+	})
+}
+
+func Test_AsyncDetailedConsume(t *testing.T) {
+	t.Run("all docs detailed consumed successfully", func(t *testing.T) {
+		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", expectedDetailedMesssages, nil)
+		defer patchDetailedConsume.Reset()
+		got, err := WaitUntilDone(mongoService.AsyncDetailedConsume("", "", time.Second))
+		assert.Nil(t, err)
+		assert.ElementsMatch(t, expectedDetailedMesssages, got)
+		// for i, doc := range got {
+		// 	assert.Equal(t, expectedDetailedMesssages[i].Body, doc)
+		// }
+	})
+
+	t.Run("failed detailed consuming", func(t *testing.T) {
+		patchDetailedConsume := gomonkey.ApplyMethodReturn(mongoService, "DetailedConsume", nil, errors.New("error in DetailedConsume"))
+		defer patchDetailedConsume.Reset()
+		got, err := WaitUntilDone(mongoService.AsyncDetailedConsume("", "", time.Second))
+		assert.Nil(t, got)
+		assert.NotNil(t, err)
+		assert.Equal(t, "error in DetailedConsume", err.Error())
 	})
 }
