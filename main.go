@@ -7,6 +7,10 @@ package main
 // 	"firefly.io/atmos/mongo"
 // )
 
+func main() {
+
+}
+
 // func main() {
 // 	mongoService, err := mongo.NewMongoService("localhost", 27017, "", "")
 // 	if err != nil {
