@@ -129,6 +129,7 @@ func (m *MongoService) TimestampConsume(databaseName, collectionName string, tim
 	return
 }
 
+// mapDocs get a slice of MongoDB documents and mapping them by their '_id'
 func mapDocs(docs []bson.M) (map[primitive.ObjectID]*DetailedMessage[bson.M], error) {
 	docsMap := make(map[primitive.ObjectID]*DetailedMessage[bson.M])
 
@@ -144,6 +145,7 @@ func mapDocs(docs []bson.M) (map[primitive.ObjectID]*DetailedMessage[bson.M], er
 	return docsMap, nil
 }
 
+// getDocId extract the value of the field '_id' of the MongoDB document
 func getDocId(doc bson.M) (id primitive.ObjectID, err error) {
 	objectId, ok := doc["_id"]
 	if !ok {
@@ -156,6 +158,7 @@ func getDocId(doc bson.M) (id primitive.ObjectID, err error) {
 	return
 }
 
+// fetchAll gets all existsing documents from the collection in MongoDB
 func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collection, filter bson.M) (docs []bson.M, err error) {
 	cursor, err := collection.Find(ctx, filter)
 	if err != nil {
