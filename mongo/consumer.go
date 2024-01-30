@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type DetailedMessage[T any] struct {
@@ -177,7 +178,9 @@ func (m *MongoService) fetchAll(ctx context.Context, collection *mongo.Collectio
 
 func watchForChanges(changeEventChan chan *changeEvent, errChan chan error, collection *mongo.Collection) {
 	ctx := context.Background()
-	changeStream, err := collection.Watch(ctx, mongo.Pipeline{})
+	changeStreamOptions := &options.ChangeStreamOptions{}
+	changeStreamOptions.SetFullDocument(options.UpdateLookup)
+	changeStream, err := collection.Watch(ctx, mongo.Pipeline{}, changeStreamOptions)
 	if err != nil {
 		errChan <- err
 		close(errChan)
